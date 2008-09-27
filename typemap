@@ -1,0 +1,7 @@
+TYPEMAP
+
+SECStatus               T_IV
+PRInt32                 T_IV
+PRBool                  T_IV
+Net::NSS::SSL           T_PTROBJ
+Crypt::NSS::Certificate T_PTROBJ
