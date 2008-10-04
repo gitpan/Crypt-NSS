@@ -81,6 +81,14 @@ Net::NSS::SSL - SSL sockets using NSS
 
 =head2 CLASS METHODS
 
+=head3 Creating sockets
+
+The prefered way of creating sockets is by using the C<new> constructor. This creates this socket, 
+sets the desired options, imports it into SSL layer and connects to the peer host, or binds and sets up 
+a listening socket, in the correct order. If you need more control it's possible to create a new socket 
+using C<create_socket> which in turn must be SSL enabled by calling C<import_into_ssl_layer> before 
+connecting or listening.
+
 =over 4
 
 =item new ( ADDR, %ARGS ) : Net::NSS::SSL
@@ -98,12 +106,27 @@ the SSL layer. You probablly want to use C<new> instead of this method.
 
 =head2 INSTANCE METHODS
 
+=head3 Connecting to a host
+
 =over 4
+
+=item set_URL ( URL | HOST )
+
+=item get_URL ( ) : STRING
+
+Set or get the domain name of the host we connect to (or actually what the CN in the servers certificate says). This 
+is used in handshaking and if not matching handshake will fail.
 
 =item connect ( HOST, PORT, [ TIMEOUT ] )
 
 Conencts to the host I<HOST> on the given I<PORT>. The optional argument I<TIMEOUT> sets how many seconds 
 connect has to complete the connection setup. If ommited C<PR_INTERVAL_NO_TIMEOUT> is used.
+
+=back
+
+=head3 Listening and accepting incoming connections
+
+=over 4
 
 =item bind ( HOST, PORT ) 
 
@@ -121,14 +144,15 @@ optional argument I<TIMEOUT> specified determined how long the connection setup 
 
 This method blocks the calling thread until either a new connection is successfully accepted or an error occurs. 
 
-=item set_domain ( DOMAIN )
+=back
 
-Sets the domain name of the host we connect to (or actually what the CN in the servers certificate says). This 
-is used in handshaking and if not matching handshake will fail.
+=head3 Socket settings and security options
 
-=item set_socket_option ( OPTION, VALUE )
+=over 4
 
-=item get_socket_option ( OPTION ) : VALUE
+=item set_option ( OPTION, VALUE )
+
+=item get_option ( OPTION ) : VALUE
 
 Gets and sets socket options. The following options are valid:
 
@@ -148,6 +172,9 @@ Do blocking or non-blocking (network) I/O.
 
 =back
 
+This method also works with SSL options if passed a numeric argument as exported by C<Crypt::NSS::Constants qw(:ssl)> and passing either C<SSL_OPTION_ENABLED> or 
+C<SSL_OPTION_DISABLED> as the value.
+
 =item close ( )
 
 Closes the socket.
@@ -160,6 +187,51 @@ you.
 =item set_pkcs11_pin_arg ( ARG )
 
 Sets the argument that is passed along to pkcs11 callbacks for the given socket. I<ARG> can be any Perl scalar.
+
+=item set_verify_certificate_hook ( CODE )
+
+Sets a custom hook to verify an incoming certificate. The hook is passed the C<Net::NSS::SSL>-object that the 
+hook is registered on, a boolean indicating whether signature should be checked and a boolean indicating if 
+the certificate should be verified as a server (if true) or as a client (if false). The hook can obtain the 
+certificate to be verified by calling C<peer_certificate> on the passed C<Net::NSS::SSL>-object.
+
+To indicate that verification was ok the hook must return C<SEC_SUCCESS>, or C<SEC_FAILURE> if not. Both constants 
+are exported by requesting the tag C<:sec> from C<Crypt::NSS::Constants>.
+
+If not set, NSS uses a default hook that does the right thing in most cases. If you've replaced this with 
+your own reverting to the built-in can be done by passing C<undef> to this method.
+
+Example:
+
+  sub my_verify_certificate_hook {
+      my ($self, $check_signature, $is_server) = @_;
+      
+      my $cert = $self->peer_certificate():
+      
+      return SEC_SUCCESS;
+  }
+  
+=item set_bad_certificate_hook ( CODE )
+
+Sets a custom hook that is called when certficate authentication (the callback specified above) fails. 
+
+=item set_client_certificate_auth_hook ( CODE [, NICKNAME | DATA] )
+
+Sets a custom hook that is called when a server requests a certificate for authentication. The hook is passed 
+the C<Net::NSS::SSL>-object that is the subject of the authentication request and an array reference containing 
+the names of the CAs the server accepts and optionally the nickname (or data) specified.
+
+The hook must return a 2-element list containing: 1) A C<Crypt::NSS::Certificate>-object representing the 
+authentication certificate and 2)  
+
+By default no hook is set and one must be provided if your client application is to support 
+client authentication. 
+
+NSS provides a built-in hook that should be sufficient in most cases - if a nickname is set it uses that to 
+find the right cert and key otherwise it scans the database for a match. To use the built-in hook pass C<"built-in"> 
+as the code argument.
+
+If you're using C<new> to construct the socket you can declare your callback using the key C<ClientAuthHook>.
 
 =item peer_certificate ( ) : Crypt::NSS::Certificate
 
@@ -194,9 +266,26 @@ Returns the number of bytes of data available for read.
 
 Returns the host of the remote side.
 
-=ite peerport ( ) : INTEGER
+=item peerport ( ) : INTEGER
 
 Returns the port on the remote side.
+
+=item remove_from_session_cache ( ) 
+
+Removes the socket from the session cache.
+
+=back
+
+=head3 Reading and writing
+
+=over 4
+
+=item read ( BUFFER [, CHUNK_SIZE] ) : INTEGER
+
+Reads data the scalar passed as I<BUFFER> 8192 bytes at the time or I<CHUNK_SIZE> if specified. Returns 
+the actual number of bytes read or 0 if we've reached EOF. This method is blocking.
+
+=item write ( DATA ) : INTEGER
 
 =back
 

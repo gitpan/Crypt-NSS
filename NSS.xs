@@ -2,79 +2,71 @@
 #include "perl.h"
 #include "XSUB.h"
 
-#include "nss.h"
-#include "ssl.h"
-#include "prio.h"
-#include "prtypes.h"
-#include "prnetdb.h"
-#include "cert.h"
-
 #include "ppport.h"
 
-#define HAS_ARGUMENT(hv, key) hv_exists(hv, key, strlen(key))
-#define SET_SOCKET_OPTION(socket, option, report) if (PR_SetSocketOption(socket, &option) != SECSuccess) { \
-    PR_Close(socket); \
-    throw_exception_from_nspr_error(report); \
-}
+#include "NSS.h"
 
-#define EVALUATE_SEC_CALL(call, report) if (call != SECSuccess) { \
-    throw_exception_from_nspr_error(report); \
-}
-
-#define EVALUATE_PR_CALL(call, report) if (call != PR_SUCCESS) { \
-    throw_exception_from_nspr_error(report); \
-}
-
-struct NSS_SSL_Socket {
-    PRFileDesc * fd;
-    SV * pkcs11arg;
-    PRNetAddr addr;
-    bool connected;
-};
-
-typedef struct NSS_SSL_Socket NSS_SSL_Socket;
-
-typedef CERTCertificate * Crypt__NSS__Certificate;
-
-typedef NSS_SSL_Socket * Net__NSS__SSL;
-
-//extern  PRInt16 SSL_NumImplementedCiphers;
-//extern const PRInt16 SSL_ImplementedCiphers[];
+#define BUFFER_SIZE 8192
 
 static const char * config_dir = NULL;
 
-static SV * PasswordFunc = NULL;
+static SV * PasswordHook = NULL;
 
 char *
-pkcs11_password_func(PK11SlotInfo *info, PRBool retry, void *arg) {
+pkcs11_password_hook(PK11SlotInfo *info, PRBool retry, void *arg) {
     dSP;
-    char * password, * tmp;
+    char * password = NULL, * tmp;
+    SV * rv;
     I32 rcount;
     
     ENTER;
     SAVETMPS;
     PUSHMARK(SP);
 
-    XPUSHs(boolSV(retry));
-    XPUSHs((SV *) arg);
+    XPUSHs(sv_2mortal(boolSV(retry)));
+    XPUSHs(sv_2mortal(newSVsv((SV *) arg)));
 
     PUTBACK;
 
-    rcount = call_sv(PasswordFunc, G_SCALAR);
+    rcount = call_sv(PasswordHook, G_SCALAR);
 
     SPAGAIN;
 
     if (rcount == 1) {
-        tmp = SvPV_nolen(POPs);
-        Safefree(tmp);
-        password = PORT_Strdup((char *) tmp);
+        rv = POPs;
+        if (SvTRUE(rv) && SvPOK(rv)) {
+            tmp = SvPV_nolen(rv);
+            password = PORT_Strdup((char *) tmp);
+        }
     }
-
+    
     PUTBACK;
     FREETMPS;
     LEAVE;
 
     return password;
+}
+
+/* This is called when we need to verify an incoming certificate */
+SECStatus
+verify_certificate_hook(void * arg, PRFileDesc * fd, PRBool check_sig, PRBool is_server) {    
+    fprintf(stderr, "In verify_certificate_hook\n");
+    
+    return SECSuccess;
+}
+
+SECStatus
+bad_certificate_hook(void * arg, PRFileDesc * fd) { 
+    fprintf(stderr, "In bad_certificate_hook\n");
+}
+
+SECStatus
+client_certificate_hook(void * arg, PRFileDesc * fd, CERTDistNames * ca_names, CERTCertificate ** target_cert, SECKEYPrivateKey ** target_key) {
+    fprintf(stderr, "Called client_certificate_hook\n");
+    *target_cert = NULL;
+    *target_key = NULL;
+    
+    return SECFailure;
 }
 
 static void
@@ -120,6 +112,16 @@ get_argument_as_PRBool(HV *args, const char *key, PRBool default_value) {
     return (PRBool) SvTRUE(*value);
 }
 
+MODULE = Crypt::NSS     PACKAGE = Crypt::NSS::PrivateKey
+
+void
+DESTROY(self)
+    Crypt::NSS::PrivateKey self;
+    CODE:
+        if (self != NULL) {
+            SECKEY_DestroyPrivateKey(self);
+        }
+
 MODULE = Crypt::NSS        PACKAGE = Net::NSS::SSL
 
 Net::NSS::SSL
@@ -139,59 +141,221 @@ create_socket(pkg, type)
         else {
             croak("Unknown socket type '%s'. Valid types are are 'tcp' and 'udp'", type);
         }
-        
+
         if (socket->fd == NULL) {
             throw_exception_from_nspr_error("Failed to create new TCP socket");
         }        
 
-        socket->connected = FALSE;
+        socket->is_connected = FALSE;
         RETVAL = socket;
     OUTPUT:
         RETVAL
 
-void
-set_socket_option(self, option, value)
+void 
+set_option(self, option, value)
     Net::NSS::SSL self;
-    const char * option;
+    SV * option;
     I32 value;
     PREINIT:
-        PRSocketOptionData socketOption;
-    CODE: {
-        if (strEQ(option, "KeepAlive")) {
-            socketOption.option = PR_SockOpt_Keepalive;
-            socketOption.value.keep_alive = value ? PR_TRUE : PR_FALSE;
+        char * name;
+        I32 num;
+        PRSocketOptionData sock_opt;
+    CODE:
+        if (SvPOK(option)) {
+            name = SvPV_nolen(option);
+            if (strEQ(name, "KeepAlive")) {
+                sock_opt.option = PR_SockOpt_Keepalive;
+                sock_opt.value.keep_alive = value ? PR_TRUE : PR_FALSE;
+            }
+            else if (strEQ(name, "NoDelay")) {
+                sock_opt.option = PR_SockOpt_NoDelay;
+                sock_opt.value.no_delay = value ? PR_TRUE : PR_FALSE;
+            }
+            else if (strEQ(name, "Blocking")) {
+                sock_opt.option = PR_SockOpt_Nonblocking;
+                sock_opt.value.non_blocking = value ? PR_FALSE : PR_TRUE;
+            }
+            else {
+                croak("Unknown option '%s'", option);
+            }
+            
+            SET_SOCKET_OPTION(self->fd, sock_opt, form("Failed to set option '%s' on socket", option));
         }
-        else if (strEQ(option, "NoDelay")) {
-            socketOption.option = PR_SockOpt_NoDelay;
-            socketOption.value.no_delay = value ? PR_TRUE : PR_FALSE;
+        else if (SvIOK(option)) {
+            EVALUATE_SEC_CALL(SSL_OptionSet(self->ssl_fd, SvIV(option), value), "Failed to set option")
         }
-        else if (strEQ(option, "Blocking")) {
-            socketOption.option = PR_SockOpt_NoDelay;
-            socketOption.value.non_blocking = value ? PR_FALSE : PR_TRUE;
+
+SV *
+get_option(self, option)
+    Net::NSS::SSL self;
+    SV * option;
+    PREINIT:
+        char * name;
+        I32 num;
+        PRSocketOptionData sock_opt;
+        PRBool on;
+    CODE:
+        if (SvPOK(option)) {
+            name = SvPV_nolen(option);
+            if (strEQ(name, "KeepAlive")) {
+                sock_opt.option = PR_SockOpt_Keepalive;
+                GET_SOCKET_OPTION(self->fd, sock_opt, option);
+                RETVAL = boolSV(sock_opt.value.keep_alive ? TRUE : FALSE);
+            }
+            else if (strEQ(name, "NoDelay")) {
+                sock_opt.option = PR_SockOpt_NoDelay;
+                GET_SOCKET_OPTION(self->fd, sock_opt, option);
+                RETVAL = boolSV(sock_opt.value.no_delay ? TRUE : FALSE);
+            }
+            else if (strEQ(name, "Blocking")) {
+                sock_opt.option = PR_SockOpt_Nonblocking;
+                GET_SOCKET_OPTION(self->fd, sock_opt, option);
+                RETVAL = boolSV(sock_opt.value.non_blocking ? FALSE : TRUE);
+            }
+            else {
+                croak("Unknown option '%s'", option);            
+            }
+        }
+        else if (SvIOK(option)) {
+            EVALUATE_SEC_CALL(SSL_OptionGet(self->ssl_fd, SvIV(option), &on), "Failed to get option")
+            RETVAL = newSViv(on);
+        }
+    OUTPUT:
+        RETVAL
+        
+void
+set_verify_certificate_hook(self, hook)
+    Net::NSS::SSL self;
+    SV * hook;
+    CODE:
+        if (self->verify_certificate_hook != NULL) {
+            SvREFCNT_dec(self->verify_certificate_hook);
+        }
+        if (SvTRUE(hook)) {
+            if (self->verify_certificate_hook != NULL) {
+                EVALUATE_SEC_CALL(SSL_AuthCertificateHook(self->ssl_fd, verify_certificate_hook, self), "Failed to set auth certificate hook");
+            }
+            if (self->verify_certificate_hook == NULL) {
+                self->verify_certificate_hook = newSVsv(hook);
+            }
+            else {
+                sv_setsv(self->verify_certificate_hook, hook);
+            }
         }
         else {
-            croak("Unknown option '%s'", option);
-        
-        SET_SOCKET_OPTION(self->fd, socketOption, form("Failed to set option '%s' on socket", option));
-    }
+            EVALUATE_SEC_CALL(SSL_AuthCertificateHook(self->ssl_fd, SSL_AuthCertificate, NULL), "Failed to set default auth certificate hook");
+        }
+
+void
+set_bad_certificate_hook(self, hook)
+    Net::NSS::SSL self;
+    SV * hook;
+    CODE:
+        if (self->bad_certificate_hook != NULL) {
+            SvREFCNT_dec(self->bad_certificate_hook);
+        }
+        if (SvTRUE(hook)) {
+            if (self->bad_certificate_hook != NULL) {
+                EVALUATE_SEC_CALL(SSL_BadCertHook(self->ssl_fd, bad_certificate_hook, self), "Failed to set bad certificate hook");
+            }
+            if (self->bad_certificate_hook == NULL) {
+                self->bad_certificate_hook = newSVsv(hook);
+            }
+            else {
+                sv_setsv(self->bad_certificate_hook, hook);
+            }
+        }
+        else {
+            EVALUATE_SEC_CALL(SSL_BadCertHook(self->ssl_fd, NULL, NULL), "Failed to set default bad certificate hook");
+        }
+
+void
+set_client_certificate_hook(self, hook, data=NULL)
+    Net::NSS::SSL self;
+    SV * hook;
+    SV * data;
+    PREINIT:
+        char * tmp;
+        char * nickname = NULL;
+    CODE:        
+        if (self->client_certificate_hook != NULL) {
+            SvREFCNT_dec(self->client_certificate_hook);
+        }
+        if (SvPOK(hook) && strEQ(SvPV_nolen(hook), "built-in")) {
+            if (data != NULL) {
+                tmp = SvPV_nolen(data);
+                nickname = PL_strdup(tmp);
+            }
+            SSL_GetClientAuthDataHook(self->ssl_fd, NSS_GetClientAuthData, NULL);
+        }
+        else if (SvTRUE(hook)) {
+            SSL_GetClientAuthDataHook(self->ssl_fd, client_certificate_hook, ST(0));
+            if (self->client_certificate_hook == NULL) {
+                self->client_certificate_hook = newSVsv(hook);
+            }
+            else {
+                sv_setsv(self->client_certificate_hook, hook);
+            }
+        }
+        else {
+            SSL_GetClientAuthDataHook(self->ssl_fd, NULL, NULL);
+        }
 
 void
 set_pkcs11_pin_arg(self, arg)
     Net::NSS::SSL self;
     SV * arg;
+    PREINIT:
+        SV * pre_arg;
     CODE:
-        if (self->pkcs11arg != NULL) {
-            SvREFCNT_dec(self->pkcs11arg);
+        pre_arg = (SV *) SSL_RevealPinArg(self->ssl_fd);
+        if (pre_arg != NULL) {
+            SvREFCNT_dec(pre_arg);
         }
-        self->pkcs11arg = SvREFCNT_inc(arg);
-        
+        SSL_SetPKCS11PinArg(self->ssl_fd, (void *) SvREFCNT_inc(arg));
+
+SV *
+get_pkcs11_pin_arg(self)
+    Net::NSS::SSL self;
+    PREINIT:
+        SV * arg;
+    CODE:
+        arg = (SV *) SSL_RevealPinArg(self->ssl_fd);
+        if (arg == NULL) {
+            XSRETURN_UNDEF;
+        }
+        RETVAL = arg;
+    OUTPUT:
+        RETVAL
+
 void
-set_domain(self, hostname)
+set_URL(self, hostname)
     Net::NSS::SSL self;
     const char * hostname;
     CODE:
-        EVALUATE_SEC_CALL(SSL_SetURL(self->fd, hostname), "Failed to set url")
-    
+        EVALUATE_SEC_CALL(SSL_SetURL(self->ssl_fd, hostname), "Failed to set url")
+
+const char *
+get_URL(self)
+    Net::NSS::SSL self;
+    PREINIT:
+        char * domain;
+    CODE:
+        domain = SSL_RevealURL(self->ssl_fd);
+        RETVAL = savepv(domain);
+        PR_Free(domain);
+    OUTPUT:
+        RETVAL
+
+void
+remove_from_session_cache(self)
+    Net::NSS::SSL self;
+    CODE:
+        if (SSL_InvalidateSession(self->ssl_fd) < 0) {
+            throw_exception_from_nspr_error("Failed to invalidate session for socket");
+        }
+
+
 void
 connect(self, hostname, port, timeout = PR_INTERVAL_NO_TIMEOUT)
     Net::NSS::SSL self;
@@ -207,9 +371,9 @@ connect(self, hostname, port, timeout = PR_INTERVAL_NO_TIMEOUT)
         if (PR_EnumerateHostEnt(0, &hostentry, port, &addr) < 0) {
             throw_exception_from_nspr_error("Failed to get IP from host entry");
         }
-        EVALUATE_PR_CALL(PR_Connect(self->fd, &addr, PR_INTERVAL_NO_TIMEOUT), "Connection failed")
-        self->connected = boolSV(TRUE);
-        
+        EVALUATE_PR_CALL(PR_Connect(self->ssl_fd, &addr, PR_INTERVAL_NO_TIMEOUT), "Connection failed")        
+        self->is_connected = TRUE;
+
 void
 bind(self, hostname, port)
     Net::NSS::SSL self;
@@ -248,12 +412,13 @@ accept(self, timeout = PR_INTERVAL_NO_TIMEOUT)
         }
         Newz(1, new_socket, 1, NSS_SSL_Socket);
         new_socket->fd = remote_fd;
-        Copy(&addr, &(new_socket->addr), 1, PRNetAddr);
-        new_socket->connected = PR_TRUE;
+        new_socket->ssl_fd = SSL_ImportFD(NULL, new_socket->fd);
+        new_socket->is_connected = TRUE;
+        new_socket->does_ssl = TRUE;
         RETVAL = new_socket;
     OUTPUT:
         RETVAL
-        
+
 void
 listen(self, queue_length=10)
     Net::NSS::SSL self;
@@ -269,15 +434,34 @@ import_into_ssl_layer(self, proto=NULL)
         PRFileDesc * proto_sock = NULL;
     CODE:
         if (proto != NULL) {
-            proto_sock = proto->fd;
+            proto_sock = proto->ssl_fd;
         }
-        self->fd = (PRFileDesc *) SSL_ImportFD(proto_sock, self->fd);
+        self->ssl_fd = (PRFileDesc *) SSL_ImportFD(proto_sock, self->fd);
+        self->does_ssl = TRUE;
 
+void
+reset_handshake(self, as_server)
+    Net::NSS::SSL self;
+    bool as_server;
+    CODE:
+        EVALUATE_SEC_CALL(SSL_ResetHandshake(self->ssl_fd, as_server ? PR_TRUE : PR_FALSE), "Failed to reset handshake");
+    
+void
+configure_as_server(self, cert, key)
+    Net::NSS::SSL self;
+    Crypt::NSS::Certificate cert;
+    Crypt::NSS::PrivateKey key;
+    PREINIT:
+        SSLKEAType certKEA;
+    CODE:
+        certKEA = NSS_FindCertKEAType(cert);
+        EVALUATE_SEC_CALL(SSL_ConfigSecureServer(self->ssl_fd, cert, key, certKEA), "Failed to configure server socket");
+    
 I32
 pending(self)
     Net::NSS::SSL self;
     CODE:
-        RETVAL = SSL_DataPending(self->fd);
+        RETVAL = SSL_DataPending(self->ssl_fd);
     OUTPUT:
         RETVAL
 
@@ -288,7 +472,10 @@ peerhost(self)
         PRNetAddr addr;
         char *hostname;
     CODE:
-        EVALUATE_PR_CALL(PR_GetPeerName(self->fd, &addr), "Failed to get peer addr")
+        if (self->ssl_fd == NULL || !self->is_connected) {
+            croak("Can't determine peerhost because we're not connected");
+        }
+        EVALUATE_PR_CALL(PR_GetPeerName(self->ssl_fd, &addr), "Failed to get peer addr")
         Newz(1, hostname, 16, char);
         if (PR_NetAddrToString(&addr, hostname, 16) != PR_SUCCESS) {
             Safefree(hostname);
@@ -304,7 +491,10 @@ peerport(self)
     PREINIT:
         PRNetAddr addr;
     CODE:
-        EVALUATE_PR_CALL(PR_GetPeerName(self->fd, &addr), "Failed to get peer addr")
+        if (self->ssl_fd == NULL || !self->is_connected) {
+            croak("Can't determine peerport because we're not connected");
+        }
+        EVALUATE_PR_CALL(PR_GetPeerName(self->ssl_fd, &addr), "Failed to get peer addr")
         RETVAL = addr.inet.port;
     OUTPUT:
         RETVAL
@@ -315,7 +505,7 @@ keysize(self)
     PREINIT:
         int keysize;
     CODE:
-        EVALUATE_SEC_CALL(SSL_SecurityStatus(self->fd, NULL, NULL, &keysize, NULL, NULL, NULL), 
+        EVALUATE_SEC_CALL(SSL_SecurityStatus(self->ssl_fd, NULL, NULL, &keysize, NULL, NULL, NULL), 
                           "Failed to get session key length")
         RETVAL = keysize;
     OUTPUT:
@@ -327,7 +517,7 @@ secret_keysize(self)
     PREINIT:
         int secret_keysize;
     CODE:
-        EVALUATE_SEC_CALL(SSL_SecurityStatus(self->fd, NULL, NULL, NULL, &secret_keysize, NULL, NULL), 
+        EVALUATE_SEC_CALL(SSL_SecurityStatus(self->ssl_fd, NULL, NULL, NULL, &secret_keysize, NULL, NULL), 
                          "Failed to get session secret key length")
         RETVAL = secret_keysize;
     OUTPUT:
@@ -339,7 +529,7 @@ cipher(self)
     PREINIT:
         char *cipher;
     CODE:
-        EVALUATE_SEC_CALL(SSL_SecurityStatus(self->fd, NULL, &cipher, NULL, NULL, NULL, NULL),
+        EVALUATE_SEC_CALL(SSL_SecurityStatus(self->ssl_fd, NULL, &cipher, NULL, NULL, NULL, NULL),
                                              "Failed to get session cipher")
         RETVAL = savepv(cipher);
         PR_Free(cipher);
@@ -352,7 +542,7 @@ issuer(self)
     PREINIT:
         char *issuer;
     CODE:
-        EVALUATE_SEC_CALL(SSL_SecurityStatus(self->fd, NULL, NULL, NULL, NULL, &issuer, NULL),
+        EVALUATE_SEC_CALL(SSL_SecurityStatus(self->ssl_fd, NULL, NULL, NULL, NULL, &issuer, NULL),
                                              "Failed to get session issuer")
         RETVAL = savepv(issuer);
         PR_Free(issuer);
@@ -365,41 +555,71 @@ subject(self)
     PREINIT:
         char *subject;
     CODE:
-        EVALUATE_SEC_CALL(SSL_SecurityStatus(self->fd, NULL, NULL, NULL, NULL, NULL, &subject),
+        EVALUATE_SEC_CALL(SSL_SecurityStatus(self->ssl_fd, NULL, NULL, NULL, NULL, NULL, &subject),
                                              "Failed to get session subject")
         RETVAL = savepv(subject);
         PR_Free(subject);
     OUTPUT:
         RETVAL
-        
-void
-set_option(self, option, on)
+    
+I32
+write(self, data)
     Net::NSS::SSL self;
-    PRInt32 option;
-    PRBool on;
-    CODE:
-        EVALUATE_SEC_CALL(SSL_OptionSet(self->fd, option, on), "Failed to set option")
-        
-PRBool
-get_option(self, option)
-    Net::NSS::SSL self;
-    PRInt32 option;
+    SV * data;
     PREINIT:
-        PRBool on;
+        char *buf;
+        PRInt32 bytes_written = 0;
+        STRLEN len;
     CODE:
-        EVALUATE_SEC_CALL(SSL_OptionGet(self->fd, option, &on), "Failed to get option")
-        RETVAL = on;
+        buf = SvPVx(data, len);
+        if (len) {
+            bytes_written = PR_Write(self->ssl_fd, buf, len);
+            if (bytes_written < 0) {
+                throw_exception_from_nspr_error("Failed to write to socket");
+            }
+        }
+        RETVAL = bytes_written;
     OUTPUT:
         RETVAL
-
+        
+I32
+read(self, buf, chunk_size = BUFFER_SIZE)
+    Net::NSS::SSL self;
+    I32 chunk_size;
+    PREINIT:
+        char *buf;
+        PRInt32 bytes_read;
+        STRLEN len;
+    INPUT:
+        SV * buf_sv = ST(1);
+    CODE:
+        if (!SvPOK(buf_sv)) {
+            sv_setpv(buf_sv, "");
+        }
+        buf = SvPV_force(buf_sv, len);
+        buf = SvGROW(buf_sv, chunk_size + 1);
+        bytes_read = PR_Read(self->ssl_fd, buf, chunk_size);
+        if (bytes_read > 0) {
+            SvCUR_set(buf_sv, bytes_read);
+        }
+        else if (bytes_read == 0) {
+            sv_setsv(buf_sv, &PL_sv_undef);
+        }
+        else {
+            throw_exception_from_nspr_error("Failed to read from socket");
+        }
+        RETVAL = bytes_read;
+    OUTPUT:
+        RETVAL
+        
 void
 close(self)
     Net::NSS::SSL self;
     CODE:
-        if (self->fd != NULL) {
-            EVALUATE_PR_CALL(PR_Close(self->fd), "Failed to close socket")
-            self->fd = NULL;
-            self->connected = PR_FALSE;
+        if (self->ssl_fd != NULL) {
+            EVALUATE_PR_CALL(PR_Close(self->ssl_fd), "Failed to close socket")
+            self->ssl_fd = NULL;
+            self->is_connected = PR_FALSE;
         }        
 
 Crypt::NSS::Certificate
@@ -408,15 +628,111 @@ peer_certificate(self)
     PREINIT:
         CERTCertificate * cert;
     CODE:
-        cert = SSL_PeerCertificate(self->fd);
+        cert = SSL_PeerCertificate(self->ssl_fd);
         if (cert == NULL) {
             XSRETURN_UNDEF;
         }
         RETVAL = cert;
     OUTPUT:
         RETVAL
-        
+
+bool
+is_connected(self)
+    Net::NSS::SSL self;
+    CODE:
+        RETVAL = self->is_connected;
+    OUTPUT:
+        RETVAL
+
+bool
+does_ssl(self)
+    Net::NSS::SSL self;
+    CODE:
+        RETVAL = self->ssl_fd != 0 ? TRUE : FALSE;
+    OUTPUT:
+        RETVAL
+
 MODULE = Crypt::NSS     PACKAGE = Crypt::NSS::Certificate
+
+Crypt::NSS::Certificate
+from_base64_DER(pkg, data)
+    const char * pkg;
+    const char * data;
+    CODE:
+        RETVAL = CERT_ConvertAndDecodeCertificate((char *) data);
+        if (RETVAL == NULL) {
+            XSRETURN_UNDEF;
+        }
+    OUTPUT:
+        RETVAL
+
+bool
+verify_hostname(self, hostname)
+    Crypt::NSS::Certificate self;
+    const char * hostname;
+    CODE:
+        RETVAL = true;
+        if (CERT_VerifyCertName(self, hostname) != SECSuccess) {
+            if (PR_GetError() == SSL_ERROR_BAD_CERT_DOMAIN) {
+                RETVAL = false;
+            }
+            else {
+                throw_exception_from_nspr_error("Failed to verify hostname");
+            }
+        }
+    OUTPUT:
+        RETVAL
+
+I32
+get_validity_for_datetime(self, year, month, mday, hour = 0, min = 0, sec = 0, usec = 0)
+    Crypt::NSS::Certificate self;
+    I32 year;
+    I32 month;
+    I32 mday;
+    I32 hour;
+    I32 min;
+    I32 sec;
+    I32 usec;
+    PREINIT:
+        PRExplodedTime ts; 
+        PRTime t;
+        SECCertTimeValidity v;
+    CODE:
+        ts.tm_usec = usec;
+        ts.tm_sec = sec;
+        ts.tm_min = min;
+        ts.tm_hour = hour;
+        ts.tm_mday = mday;
+        ts.tm_month = month;
+        ts.tm_year = year;
+        ts.tm_params.tp_gmt_offset = 0;
+        ts.tm_params.tp_dst_offset = 0;
+        t = PR_ImplodeTime(&ts);
+        v = CERT_CheckCertValidTimes(self, t, PR_TRUE);
+        RETVAL = v == secCertTimeValid ? 1 :
+                 v == secCertTimeExpired ? 2 :
+                 v == secCertTimeNotValidYet ? 3 : v;
+    OUTPUT:
+        RETVAL
+
+Crypt::NSS::PublicKey
+public_key(self)
+    Crypt::NSS::Certificate self;
+    CODE:
+        RETVAL = CERT_ExtractPublicKey(self);
+        if (RETVAL == NULL) {
+            XSRETURN_UNDEF;
+        }
+    OUTPUT:
+        RETVAL
+
+Crypt::NSS::Certificate
+clone(self)
+    Crypt::NSS::Certificate self;
+    CODE:
+        RETVAL = CERT_DupCertificate(self);
+    OUTPUT:
+        RETVAL
 
 void
 DESTROY(self)
@@ -425,24 +741,104 @@ DESTROY(self)
         if (self != NULL) {
             CERT_DestroyCertificate(self);
         }
-        
+
+
 MODULE = Crypt::NSS     PACKAGE = Crypt::NSS::PKCS11
 
 void
-set_password_func(pkg, func)
+set_password_hook(pkg, hook)
     const char * pkg;
-    SV * func;
+    SV * hook;
     CODE:
-        if (PasswordFunc != NULL) {
-            SvREFCNT_dec(PasswordFunc);
+        if (PasswordHook != NULL) {
+            SvREFCNT_dec(PasswordHook);
         }
-        PasswordFunc = SvREFCNT_inc(func);
+        PasswordHook = SvREFCNT_inc(hook);
+
+Crypt::NSS::Certificate
+find_cert_by_nickname(pkg, nickname, pin_arg=&PL_sv_undef)
+    const char * pkg;
+    const char * nickname;
+    SV * pin_arg;
+    PREINIT:
+        CERTCertificate * cert;
+    CODE:
+        cert = PK11_FindCertFromNickname(nickname, pin_arg);
+        if (cert == NULL) {
+            XSRETURN_UNDEF;
+        }
+        RETVAL = cert;
+    OUTPUT:
+        RETVAL
+
+Crypt::NSS::PrivateKey
+find_key_by_any_cert(pkg, cert, pin_arg)
+    const char * pkg;
+    Crypt::NSS::Certificate cert;
+    SV * pin_arg;
+    PREINIT:
+        SECKEYPrivateKey * key;
+    CODE:
+        key = PK11_FindKeyByAnyCert(cert, pin_arg);
+        if (key == NULL) {
+            XSRETURN_UNDEF;
+        }
+        RETVAL = key;
+    OUTPUT:
+        RETVAL
         
+const char *
+slot_name(self)
+    Crypt::NSS::PKCS11 self;
+    PREINIT:
+        char *name;
+    CODE:
+        name = PK11_GetSlotName(self);
+        RETVAL = savepv(name);
+        PR_Free(name);
+    OUTPUT:
+        RETVAL
+        
+const char *
+token_name(self)
+    Crypt::NSS::PKCS11 self;
+    PREINIT:
+        char *name;
+    CODE:
+        name = PK11_GetTokenName(self);
+        RETVAL = savepv(name);
+        PR_Free(name);
+    OUTPUT:
+        RETVAL
+
+bool
+is_hardware(self)
+    Crypt::NSS::PKCS11 self;
+    CODE:
+        RETVAL = PK11_IsHW(self) ? TRUE : FALSE;
+    OUTPUT:
+        RETVAL
+
+bool
+is_present(self)
+    Crypt::NSS::PKCS11 self;
+    CODE:
+        RETVAL = PK11_IsPresent(self) ? TRUE : FALSE;
+    OUTPUT:
+        RETVAL
+
+bool
+is_readonly(self)
+    Crypt::NSS::PKCS11 self;
+    CODE:
+        RETVAL = PK11_IsReadOnly(self) ? TRUE : FALSE;
+    OUTPUT:
+        RETVAL
+
 MODULE = Crypt::NSS        PACKAGE = Crypt::NSS::SSL
-PROTOTYPES: DISABLE
 
 void
-set_option_default(pkg, option, on)
+set_option(pkg, option, on)
     const char * pkg;
     PRInt32 option;
     PRBool  on;
@@ -450,7 +846,7 @@ set_option_default(pkg, option, on)
         EVALUATE_SEC_CALL(SSL_OptionSetDefault(option, on), "Failed to set option default")
 
 PRBool
-get_option_default(pkg, option)
+get_option(pkg, option)
     const char * pkg;
     PRInt32 option;
     PREINIT:
@@ -462,7 +858,7 @@ get_option_default(pkg, option)
         RETVAL
 
 void
-set_cipher_default(pkg, cipher, on)
+set_cipher(pkg, cipher, on)
     const char * pkg;
     PRInt32 cipher;
     PRBool  on;
@@ -470,7 +866,7 @@ set_cipher_default(pkg, cipher, on)
         EVALUATE_SEC_CALL(SSL_CipherPrefSetDefault(cipher, on), "Failed to set cipher default")
 
 PRBool
-get_cipher_default(pkg, cipher)
+get_cipher(pkg, cipher)
     const char * pkg;
     PRInt32 cipher;
     PREINIT:
@@ -560,7 +956,7 @@ config_server_session_cache(pkg, args)
             EVALUATE_SEC_CALL(SSL_ConfigMPServerSIDCache(maxCacheEntries, ssl2_timeout, ssl3_timeout, data_dir),
                                                          "Failed to config shared server session cache")
         }
-    
+
 MODULE = Crypt::NSS		PACKAGE = Crypt::NSS		
 PROTOTYPES: DISABLE
 
@@ -592,7 +988,7 @@ initialize(pkg)
     CODE:
         if (!NSS_IsInitialized()) {
             RETVAL = NSS_Init(config_dir);
-            PK11_SetPasswordFunc(pkcs11_password_func);
+            PK11_SetPasswordFunc(pkcs11_password_hook);
         }
         else
             RETVAL = SECFailure;
@@ -606,6 +1002,12 @@ is_initialized(pkg)
         RETVAL = (bool) NSS_IsInitialized();
     OUTPUT:
         RETVAL
-    
+
+void
+shutdown(pkg)
+    const char * pkg;
+    CODE:
+        NSS_Shutdown();
+        
 BOOT:
     config_dir = ".";

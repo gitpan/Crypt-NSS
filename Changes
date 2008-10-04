@@ -1,5 +1,10 @@
 Revision history for Perl extension NSS.
 
+0.01_04
+    - Read and write to sockets
+    - Some API changes
+    - Start on callbacks
+    
 0.01_03  
     - More updates to SSL sockets
     - The correct name is Crypt::NSS (bad Claes for not checking CPAN)

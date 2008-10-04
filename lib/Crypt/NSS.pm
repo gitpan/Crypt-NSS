@@ -4,30 +4,60 @@ use 5.006002;
 use strict;
 use warnings;
 
-our $VERSION = '0.01_03';
+our $VERSION = '0.01_04';
 
 require XSLoader;
 XSLoader::load('Crypt::NSS', $VERSION);
 
+require Crypt::NSS::SSL;
+require Crypt::NSS::Certificate;
+require Crypt::NSS::PKCS11;
 require Net::NSS::SSL;
 
-Crypt::NSS::PKCS11->set_password_func(sub {});
+# We must always set a password hook before we can
+# do anything with NSS. Default is an undefined password.
+Crypt::NSS::PKCS11->set_password_hook(sub {
+    my ($retry, $password) = @_;
+    if (!$retry && $password) {
+        return $password;
+    }
+    
+    return undef;
+});
 
+my $initialized = 0;
 sub import {
+    return if $initialized;
+    
+    my $config_dir;
+    my $cipher_suite = "Export";
+    
     while(@_) {
         my $arg = shift;
         if ($arg eq "config_dir") {
-            my $path = shift;
-            Crypt::NSS->set_config_dir($path);
-            Crypt::NSS->initialize;
+            $config_dir = shift;
         }
         elsif ($arg eq "init") {
-            my $path = $ENV{NSS_CONFIG_DIR};
-            Crypt::NSS->set_config_dir($path) if $path;
-            Crypt::NSS->initialize;
+            $config_dir = $ENV{NSS_CONFIG_DIR};
+            $config_dir = "." unless $config_dir;
+        }
+        elsif ($arg eq "cipher_suite") {
+            $cipher_suite = shift;
         }
     }
+    
+    if ($config_dir) {
+        Crypt::NSS->set_config_dir($config_dir);
+        Crypt::NSS->initialize();
+        Crypt::NSS::SSL->set_cipher_suite($cipher_suite);
+        $initialized = 1;
+    }
+    
     1;
+}
+
+END {
+    Crypt::NSS->shutdown();
 }
 
 1;

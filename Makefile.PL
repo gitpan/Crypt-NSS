@@ -33,7 +33,7 @@ WriteMakefile(
     ABSTRACT_FROM   => 'lib/Crypt/NSS.pm',
     AUTHOR          => 'Claes Jakobsson <claesjac@cpan.org>',
     LICENSE         => "mit",
-    LIBS            => ["${lib_search_paths} -lnss3 -lssl3"],
+    LIBS            => ["${lib_search_paths} -lnss3 -lssl3 -lsmime3"],
     DEFINE          => "-D${os}", 
     INC             => "${inc_search_paths} -I.",
 );
@@ -46,7 +46,13 @@ sub generate_Crypt_NSS_Constant_pm {
         ssl => "sslproto.h",
     );
         
-    my %constants_by_group;
+    my %constants_by_group = (
+        'ssl'   => [
+            [SSL_OPTION_ENABLED  => 1, "Enables an option" ],
+            [SSL_OPTION_DISABLED => 2, "Disables an option" ],
+        ],
+    );
+    
     while (my ($group, $header) = splice @Constants_groups, 0, 2) {
         open (my $in, "<", File::Spec->catfile($inc_base, $header)) || die $!;
         while (<$in>) {
