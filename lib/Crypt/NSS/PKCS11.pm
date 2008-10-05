@@ -3,6 +3,17 @@ package Crypt::NSS::PKCS11;
 use strict;
 use warnings;
 
+{
+    my $default_pkcs11_pin_arg;
+    sub set_default_pkcs11_pin_arg {
+        $default_pkcs11_pin_arg = pop;
+    }
+    
+    sub get_default_pkcs11_pin_arg {
+        return $default_pkcs11_pin_arg;
+    }
+}
+
 1;
 __END__
 
@@ -21,10 +32,26 @@ This module provides functions for obtaining certificates, keys, passwords etc.
 
 =over
 
-=item set_password_func ( CALLBACK )
+=item set_default_pkcs11_pin_arg ( $arg : scalar ) 
+
+=item get_default_pkcs11_pin_arg ( ) : scalar
+
+Sets the default PKCS#11 pin arg that can be set on C<Net::NSS::SSL> instances. This is useful when you want to 
+set a PKCS#11 pin arg on sockets where you can't control directly what's set to C<new>. This is mostly used when 
+you use NSS with LWP.
+
+=item set_password_hook ( $hook : code | string )
 
 Sets the function to call when a PKCS#11 module needs a password. The argument I<CALLBACK> must be either 
 a code reference or a fully qualified function name.
+
+=item find_cert_by_nickname ( $nickname : string, $arg : scalar ) : Crypt::NSS::Certificate
+
+Finds a certificate by nickname. The argument I<$arg> is passed to the hook set by C<set_password_hook>.
+
+=item find_key_by_any_cert ( $certificate : Crypt::NSS::Certificate, $arg : scalar ) : Crypt::NSS::PrivateKey
+
+Finds a private key for a certificate. The argument I<$arg> is passed to the hook set by C<set_password_hook>.
 
 =back
 

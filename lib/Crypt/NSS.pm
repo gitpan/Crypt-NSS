@@ -4,7 +4,7 @@ use 5.006002;
 use strict;
 use warnings;
 
-our $VERSION = '0.01_04';
+our $VERSION = '0.01';
 
 require XSLoader;
 XSLoader::load('Crypt::NSS', $VERSION);
@@ -66,17 +66,6 @@ __END__
 =head1 NAME
 
 Crypt::NSS - Perl bindings to NSS (Netscape Security Services)
-
-=head1 SYNOPSIS
-
-  # Using NSS for SSL connections from LWP
-  use LWP;
-  use Crypt::NSS config_dir => "$ENV{HOME}/.netscape";
-  use Net::HTTPS;
-  
-  local @Net::HTTPS::ISA = qw(Net::NSS::SSL Net::HTTP::Methods);
-  
-  my $content = get("https://secure.mycompany.com");
   
 =head1 DESCRIPTION
 
@@ -100,24 +89,28 @@ and sets the config dir to that if set.
 
 =over 4
 
-=item config_dir ( ) : STRING
+=item config_dir ( ) : string
 
 Returns the path where to look for C<cert8.db>, C<key3.db> and C<secmod.db> databases upon initialization.
 
-=item set_config_dir ( DIRECTORY ) : BOOL
+=item set_config_dir ( $directory : string ) : boolean
 
 Specify the path to the directory where the C<cert8.db>, C<key3.db> and C<secmod.db> databases can be found. 
 It's only allowed to set the directory prior to initialization or this method with return a false value.
 
-=item is_initialized ( ) : BOOL
+=item is_initialized ( ) : boolean
 
 Returns whether the underlying NSS library has been initialized or not.
 
-=item initialize ( ) : ERROR_CODE
+=item initialize ( ) : integer
 
 Initializes NSS. Returns 0 on success or an error code on failure. Initialization is usually done 
 when importing this module by passing either C<config_dir =E<gt> $path> or C<init> to use 
 the default config directory (C<.>).
+
+=item shutdown ( )
+
+Closes the certificate and key databases.
 
 =back
 

@@ -416,7 +416,7 @@ use constant {
 	SSL_NO_LOCKS => 17,	# Don't use locks for protection
 	SSL_NO_STEP_DOWN => 15,	# Disable export cipher suites
 	SSL_NULL_WITH_NULL_NULL => 0x0000,	# 
-	SSL_OPTION_DISABLED => 2,	# Disables an option
+	SSL_OPTION_DISABLED => 0,	# Disables an option
 	SSL_OPTION_ENABLED => 1,	# Enables an option
 	SSL_PE_BAD_CERTIFICATE => 0x0004,	# 
 	SSL_PE_NO_CERTIFICATE => 0x0002,	# 

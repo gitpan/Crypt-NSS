@@ -4,7 +4,7 @@ use lib "t/lib";
 use strict;
 use warnings;
 
-use Test::More tests => 11;
+use Test::More tests => 13;
 use Test::Exception;
 use Test::Crypt::NSS::SSLsample;
 
@@ -49,5 +49,8 @@ lives_ok {
 };
 
 like($reply, qr{<h2>This is your request:</h2><br>GET / HTTP/1.0});
+
+is($socket->peerport(), 4433);
+is($socket->peerhost(), "127.0.0.1");
 
 $socket->close();

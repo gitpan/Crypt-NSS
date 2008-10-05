@@ -29,7 +29,12 @@ else {
 WriteMakefile(
     NAME            => 'Crypt::NSS',
     VERSION_FROM    => 'lib/Crypt/NSS.pm',
-    PREREQ_PM       => {},
+    PREREQ_PM       => {
+        "Test::Exception" => 0,
+        "Test::More"      => 0,
+        "Symbol"          => 0,
+        "Socket"          => 0,
+    },
     ABSTRACT_FROM   => 'lib/Crypt/NSS.pm',
     AUTHOR          => 'Claes Jakobsson <claesjac@cpan.org>',
     LICENSE         => "mit",
@@ -49,7 +54,7 @@ sub generate_Crypt_NSS_Constant_pm {
     my %constants_by_group = (
         'ssl'   => [
             [SSL_OPTION_ENABLED  => 1, "Enables an option" ],
-            [SSL_OPTION_DISABLED => 2, "Disables an option" ],
+            [SSL_OPTION_DISABLED => 0, "Disables an option" ],
         ],
     );
     

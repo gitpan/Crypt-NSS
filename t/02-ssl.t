@@ -27,7 +27,7 @@ throws_ok {
 } qr/Failed to set option default: -?\d+/;
 
 # Ciphers
-ok(@{Crypt::NSS::SSL->get_implemented_cipher_ids()});
+ok(@{Crypt::NSS::SSL->_get_implemented_cipher_ids()});
 
 $status = 0;
 lives_ok {

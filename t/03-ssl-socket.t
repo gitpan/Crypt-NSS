@@ -18,8 +18,8 @@ isa_ok($socket, "Net::NSS::SSL");
 # Since we're not connected these should throw an exception
 throws_ok {
     $socket->peerhost();
-} qr/Can't determine peerhost/;
+} qr/Can't get peeraddr/;
 
 throws_ok {
     $socket->peerport();
-} qr/Can't determine peerport/;
+} qr/Can't get peeraddr/;

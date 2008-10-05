@@ -10,12 +10,15 @@ db/key3.db
 db/secmod.db
 db/server.crt
 db/server.req
+examples/lwp-https.pl
 lib/Crypt/NSS.pm
 lib/Crypt/NSS/Certificate.pm
 lib/Crypt/NSS/Constants.pm
 lib/Crypt/NSS/PKCS11.pm
+lib/Crypt/NSS/PKCS11/Slot.pm
 lib/Crypt/NSS/SSL.pm
 lib/Net/NSS/SSL.pm
+lib/Net/NSS/SSL/LWPCompat.pm
 ppport.h
 t/01-load.t
 t/02-ssl.t

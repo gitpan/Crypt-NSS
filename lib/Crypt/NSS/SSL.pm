@@ -21,9 +21,9 @@ setting cipher suites, default options etc.
 
 =over 4
 
-=item set_option_default ( OPTION, BOOLEAN )
+=item set_option ( $option : integer, $value : integer )
 
-=item get_option_default ( OPTION ) : BOOLEAN
+=item get_option ( $option : integer ) : integer
 
 Get or set defaults for SSL options on new sockets. Option should be one of the the following constants from 
 C<NSS::SSL::Constants>.
@@ -85,11 +85,45 @@ Enable or disable rollback attack detaction. Some older clients might not be abl
 
 =back
 
+=item set_cipher ( $cipher : integer, $enabled : boolean )
+
+=item get_cipher ( $cipher ) : boolean
+
+Get or set whether a cipher is enabled or not.
+
+=item config_server_session_cache ( \%ARGS )
+
+Configure the session cache if we're are a server. The option I<ARGS> must be a hash reference and takes the following options:
+
+=over 4
+
+=item max_cache_entries : integer
+
+The maximum number of entries in the cache. If ommited or specified as 0 the default 10,000 is used.
+
+=item ssl2_timeout : integer
+
+The lifetime of an SSL2 session. Minimum is 5 seconds, maximum is 24 hours. Default is 100 seconds.
+
+=item ssl3_timeout : integer
+
+The lifetime of an SSL3 session. Minimum is 5 seconds, maximum is 24 hours. Default is 24 hours.
+
+=item data_dir : string 
+
+The path to where to store the session cache. If omitted your systems temp dir is used.
+
+=item shared : boolean
+
+If your server is multithreaded or multiprocess (ie forks) you must specify this using this passing a true value in this option.
+
+=back
+
 =item clear_session_cache ( ) 
 
 Clear the session cache.
 
-=item set_cipher_suite ( SUITE )
+=item set_cipher_suite ( suite : string )
 
 Regulates what cipher suite we want. By default all ciphers are disabled so you must call this before any cryptographic 
 functions in NSS can work. Passing C<cipher_suite> during Crypto::NSS import also does this. Currently there are three 
@@ -107,5 +141,4 @@ suites declared:
 
 =back
  
-
 =cut

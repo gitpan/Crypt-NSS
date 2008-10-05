@@ -1,16 +1,6 @@
 NAME
     Crypt::NSS - Perl bindings to NSS (Netscape Security Services)
 
-SYNOPSIS
-      # Using NSS for SSL connections from LWP
-      use LWP;
-      use Crypt::NSS config_dir => "$ENV{HOME}/.netscape";
-      use Net::HTTPS;
-  
-      local @Net::HTTPS::ISA = qw(Net::NSS::SSL Net::HTTP::Methods);
-  
-      my $content = get("https://secure.mycompany.com");
-  
 DESCRIPTION
     This module provides an interface to Netscape Security Services (NSS)
     which is a set of libraries that Firefox, Thunderbird and several other
@@ -31,25 +21,28 @@ INTERFACE
 
   CLASS METHODS
 
-    config_dir ( ) : STRING
+    config_dir ( ) : string
         Returns the path where to look for `cert8.db', `key3.db' and
         `secmod.db' databases upon initialization.
 
-    set_config_dir ( DIRECTORY ) : BOOL
+    set_config_dir ( $directory : string ) : boolean
         Specify the path to the directory where the `cert8.db', `key3.db'
         and `secmod.db' databases can be found. It's only allowed to set the
         directory prior to initialization or this method with return a false
         value.
 
-    is_initialized ( ) : BOOL
+    is_initialized ( ) : boolean
         Returns whether the underlying NSS library has been initialized or
         not.
 
-    initialize ( ) : ERROR_CODE
+    initialize ( ) : integer
         Initializes NSS. Returns 0 on success or an error code on failure.
         Initialization is usually done when importing this module by passing
         either `config_dir => $path' or `init' to use the default config
         directory (`.').
+
+    shutdown ( )
+        Closes the certificate and key databases.
 
 BUGS AND LIMITATIONS
     Please report any bugs or feature requests to `bug-nss@rt.cpan.org', or

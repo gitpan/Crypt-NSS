@@ -3,7 +3,7 @@
 use strict;
 use warnings;
 
-use Test::More qw(no_plan);
+use Test::More tests => 9;
 use Test::Exception;
 
 use Crypt::NSS config_dir => "db";
@@ -24,5 +24,8 @@ $valid = 0;
 $valid = $cert->verify_hostname("127.0.0.1");
 ok($valid);
 
-#
-is($cert->get_validity_for_datetime(2008, 10, 01), 1);
+is($cert->get_validity_for_datetime(2008, 10, 01), 0);
+
+is($cert->issuer, "CN=Test CA,O=Crypt-NSS,ST=Stockholm,C=SE");
+is($cert->subject, "CN=127.0.0.1,O=Crypt-NSS,ST=Stockholm,C=SE");
+ok(!defined $cert->email_address);

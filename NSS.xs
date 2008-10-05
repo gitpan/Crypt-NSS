@@ -458,22 +458,22 @@ configure_as_server(self, cert, key)
         EVALUATE_SEC_CALL(SSL_ConfigSecureServer(self->ssl_fd, cert, key, certKEA), "Failed to configure server socket");
     
 I32
-pending(self)
+available(self)
     Net::NSS::SSL self;
     CODE:
-        RETVAL = SSL_DataPending(self->ssl_fd);
+        RETVAL = PR_Available(self->ssl_fd);
     OUTPUT:
         RETVAL
 
-const char *
-peerhost(self)
+void
+_peeraddr(self)
     Net::NSS::SSL self;
     PREINIT:
+        char * hostname;
         PRNetAddr addr;
-        char *hostname;
-    CODE:
+    PPCODE:
         if (self->ssl_fd == NULL || !self->is_connected) {
-            croak("Can't determine peerhost because we're not connected");
+            croak("Can't get peeraddr because we're not connected");
         }
         EVALUATE_PR_CALL(PR_GetPeerName(self->ssl_fd, &addr), "Failed to get peer addr")
         Newz(1, hostname, 16, char);
@@ -481,24 +481,29 @@ peerhost(self)
             Safefree(hostname);
             throw_exception_from_nspr_error("Failed to convert PRNetAddr to string");
         }
-        RETVAL = hostname;
-    OUTPUT:
-        RETVAL
+        EXTEND(SP, 2);
+        PUSHs(sv_2mortal(newSVpv(hostname, 0)));
+        PUSHs(sv_2mortal(newSViv(PR_ntohs(addr.inet.port))));
+        Safefree(hostname);
 
-I32
-peerport(self)
+void
+_sockaddr(self)
     Net::NSS::SSL self;
     PREINIT:
+        char * hostname;
         PRNetAddr addr;
-    CODE:
-        if (self->ssl_fd == NULL || !self->is_connected) {
-            croak("Can't determine peerport because we're not connected");
+    PPCODE:
+        EVALUATE_PR_CALL(PR_GetSockName(self->ssl_fd, &addr), "Failed to get peer addr")
+        Newz(1, hostname, 16, char);
+        if (PR_NetAddrToString(&addr, hostname, 16) != PR_SUCCESS) {
+            Safefree(hostname);
+            throw_exception_from_nspr_error("Failed to convert PRNetAddr to string");
         }
-        EVALUATE_PR_CALL(PR_GetPeerName(self->ssl_fd, &addr), "Failed to get peer addr")
-        RETVAL = addr.inet.port;
-    OUTPUT:
-        RETVAL
-
+        EXTEND(SP, 2);
+        PUSHs(sv_2mortal(newSVpv(hostname, 0)));
+        PUSHs(sv_2mortal(newSViv(PR_ntohs(addr.inet.port))));
+        Safefree(hostname);
+                
 I32
 keysize(self)
     Net::NSS::SSL self;
@@ -709,9 +714,9 @@ get_validity_for_datetime(self, year, month, mday, hour = 0, min = 0, sec = 0, u
         ts.tm_params.tp_dst_offset = 0;
         t = PR_ImplodeTime(&ts);
         v = CERT_CheckCertValidTimes(self, t, PR_TRUE);
-        RETVAL = v == secCertTimeValid ? 1 :
-                 v == secCertTimeExpired ? 2 :
-                 v == secCertTimeNotValidYet ? 3 : v;
+        RETVAL = v == secCertTimeValid ? 0 :
+                 v == secCertTimeExpired ? -1 :
+                 v == secCertTimeNotValidYet ? 1 : v;
     OUTPUT:
         RETVAL
 
@@ -724,6 +729,30 @@ public_key(self)
             XSRETURN_UNDEF;
         }
     OUTPUT:
+        RETVAL
+
+const char *
+subject(self)
+    Crypt::NSS::Certificate self;
+    CODE:
+        RETVAL = savepv(self->subjectName);
+    OUTPUT: 
+        RETVAL
+
+const char *
+issuer(self)
+    Crypt::NSS::Certificate self;
+    CODE:
+        RETVAL = savepv(self->issuerName);
+    OUTPUT: 
+        RETVAL
+    
+const char *
+email_address(self)
+    Crypt::NSS::Certificate self;
+    CODE:
+        RETVAL = savepv(self->emailAddr);
+    OUTPUT: 
         RETVAL
 
 Crypt::NSS::Certificate
@@ -786,10 +815,12 @@ find_key_by_any_cert(pkg, cert, pin_arg)
         RETVAL = key;
     OUTPUT:
         RETVAL
-        
+      
+MODULE = Crypt::NSS     PACKAGE = Crypt::NSS::PKCS11::Slot
+
 const char *
 slot_name(self)
-    Crypt::NSS::PKCS11 self;
+    Crypt::NSS::PKCS11::Slot self;
     PREINIT:
         char *name;
     CODE:
@@ -801,7 +832,7 @@ slot_name(self)
         
 const char *
 token_name(self)
-    Crypt::NSS::PKCS11 self;
+    Crypt::NSS::PKCS11::Slot self;
     PREINIT:
         char *name;
     CODE:
@@ -813,7 +844,7 @@ token_name(self)
 
 bool
 is_hardware(self)
-    Crypt::NSS::PKCS11 self;
+    Crypt::NSS::PKCS11::Slot self;
     CODE:
         RETVAL = PK11_IsHW(self) ? TRUE : FALSE;
     OUTPUT:
@@ -821,7 +852,7 @@ is_hardware(self)
 
 bool
 is_present(self)
-    Crypt::NSS::PKCS11 self;
+    Crypt::NSS::PKCS11::Slot self;
     CODE:
         RETVAL = PK11_IsPresent(self) ? TRUE : FALSE;
     OUTPUT:
@@ -829,7 +860,7 @@ is_present(self)
 
 bool
 is_readonly(self)
-    Crypt::NSS::PKCS11 self;
+    Crypt::NSS::PKCS11::Slot self;
     CODE:
         RETVAL = PK11_IsReadOnly(self) ? TRUE : FALSE;
     OUTPUT:
@@ -878,7 +909,7 @@ get_cipher(pkg, cipher)
         RETVAL
 
 AV *
-get_implemented_cipher_ids(pkg)
+_get_implemented_cipher_ids(pkg)
     const char * pkg;
     PREINIT:
         AV *ciphers = newAV();
@@ -927,13 +958,13 @@ config_server_session_cache(pkg, args)
     HV * args;
     PREINIT:
         int maxCacheEntries = 0;
-        PRInt32 ssl2_timeout = 0;
-        PRInt32 ssl3_timeout = 0;
+        PRInt32 ssl2_timeout = 100;
+        PRInt32 ssl3_timeout = 86400;
         const char *data_dir = NULL;
         bool shared = FALSE;
         SV **value;
     CODE:
-        if ((value = hv_fetch(args, "maxCacheEntries", 15, 0)) != NULL) {
+        if ((value = hv_fetch(args, "max_cache_entries", 17, 0)) != NULL) {
             maxCacheEntries = SvIV(*value);
         }
         if ((value = hv_fetch(args, "ssl2_timeout", 12, 0)) != NULL) {

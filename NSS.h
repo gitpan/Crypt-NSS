@@ -43,7 +43,7 @@ struct NSS_SSL_Socket {
 typedef struct NSS_SSL_Socket NSS_SSL_Socket;
 
 typedef CERTCertificate * Crypt__NSS__Certificate;
-typedef PK11SlotInfo * Crypt__NSS__PKCS11;
+typedef PK11SlotInfo * Crypt__NSS__PKCS11__Slot;
 typedef SECKEYPrivateKey * Crypt__NSS__PrivateKey;
 typedef SECKEYPublicKey * Crypt__NSS__PublicKey;
 

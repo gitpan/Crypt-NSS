@@ -1,11 +1,18 @@
 Revision history for Perl extension NSS.
 
-0.01_04
+0.01  2008-10-05
+    - Initial non-development release
+    - Updated docs
+    - More tests
+    - Added INSTALL instructions
+    - and more of NSS API bridged
+
+0.01_04  2008-10-04
     - Read and write to sockets
     - Some API changes
     - Start on callbacks
     
-0.01_03  
+0.01_03  2008-09-27
     - More updates to SSL sockets
     - The correct name is Crypt::NSS (bad Claes for not checking CPAN)
     - Added missing license file
