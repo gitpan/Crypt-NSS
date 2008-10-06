@@ -1,4 +1,5 @@
 Changes
+INSTALL
 LICENSE
 MANIFEST
 Makefile.PL
@@ -26,6 +27,7 @@ t/03-ssl-socket.t
 t/04-ssl-server.t
 t/05-ssl-client.t
 t/06-certificates.t
+t/07-ssl-client-auth.t
 t/lib/Test/Crypt/NSS/SSLsample.pm
 t/lib/Test/Crypt/NSS/TestServer.pm
 t/pod-coverage.t

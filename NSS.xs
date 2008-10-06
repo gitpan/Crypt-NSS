@@ -50,8 +50,6 @@ pkcs11_password_hook(PK11SlotInfo *info, PRBool retry, void *arg) {
 /* This is called when we need to verify an incoming certificate */
 SECStatus
 verify_certificate_hook(void * arg, PRFileDesc * fd, PRBool check_sig, PRBool is_server) {    
-    fprintf(stderr, "In verify_certificate_hook\n");
-    
     return SECSuccess;
 }
 
@@ -62,11 +60,60 @@ bad_certificate_hook(void * arg, PRFileDesc * fd) {
 
 SECStatus
 client_certificate_hook(void * arg, PRFileDesc * fd, CERTDistNames * ca_names, CERTCertificate ** target_cert, SECKEYPrivateKey ** target_key) {
-    fprintf(stderr, "Called client_certificate_hook\n");
+    dSP;
+    SV * self = (SV *) arg;
+    SV * rv;
+    IV tmp, rcount;
+    Net__NSS__SSL socket;
+    SECStatus status = SECSuccess;
+    
+    tmp = SvIV((SV *) SvRV(self));
+    socket = INT2PTR(Net__NSS__SSL, tmp);
+    
+    ENTER;
+    SAVETMPS;
+    PUSHMARK(SP);
+    
+    XPUSHs(sv_2mortal(newSVsv(self)));
+    XPUSHs(sv_2mortal(newSVsv(socket->client_certificate_hook_arg)));
+
+    PUTBACK;
+
+    rcount = call_sv(socket->client_certificate_hook, G_ARRAY);
+
+    SPAGAIN;
+
     *target_cert = NULL;
     *target_key = NULL;
-    
-    return SECFailure;
+
+    if (rcount == 2) {
+        rv = POPs;
+        if (SvTRUE(rv) && sv_derived_from(rv, "Crypt::NSS::PrivateKey")) {
+            tmp = SvIV((SV *) SvRV(rv));
+            *target_key = SECKEY_CopyPrivateKey(INT2PTR(Crypt__NSS__PrivateKey, tmp));
+    	}
+    	else {
+            status = SECFailure;
+    	}
+    	
+        rv = POPs;
+        if (SvTRUE(rv) && sv_derived_from(rv, "Crypt::NSS::Certificate")) {
+            tmp = SvIV((SV *) SvRV(rv));
+            *target_cert = CERT_DupCertificate(INT2PTR(Crypt__NSS__Certificate, tmp));
+    	}
+    	else {
+            status = SECFailure;
+    	}
+    }
+    else {
+        status = SECFailure;
+    }
+
+    PUTBACK;
+    FREETMPS;
+    LEAVE;
+        
+    return status;
 }
 
 static void
@@ -278,6 +325,10 @@ set_client_certificate_hook(self, hook, data=NULL)
         char * tmp;
         char * nickname = NULL;
     CODE:        
+        if (self->client_certificate_hook_arg) {
+            SvREFCNT_dec(self->client_certificate_hook_arg);
+            self->client_certificate_hook_arg = NULL;
+        }
         if (self->client_certificate_hook != NULL) {
             SvREFCNT_dec(self->client_certificate_hook);
         }
@@ -290,12 +341,8 @@ set_client_certificate_hook(self, hook, data=NULL)
         }
         else if (SvTRUE(hook)) {
             SSL_GetClientAuthDataHook(self->ssl_fd, client_certificate_hook, ST(0));
-            if (self->client_certificate_hook == NULL) {
-                self->client_certificate_hook = newSVsv(hook);
-            }
-            else {
-                sv_setsv(self->client_certificate_hook, hook);
-            }
+            self->client_certificate_hook = SvREFCNT_inc(hook);        
+            self->client_certificate_hook_arg = SvREFCNT_inc(data);
         }
         else {
             SSL_GetClientAuthDataHook(self->ssl_fd, NULL, NULL);
@@ -324,7 +371,7 @@ get_pkcs11_pin_arg(self)
         if (arg == NULL) {
             XSRETURN_UNDEF;
         }
-        RETVAL = arg;
+        RETVAL = SvREFCNT_inc(arg);
     OUTPUT:
         RETVAL
 
@@ -626,7 +673,30 @@ close(self)
             self->ssl_fd = NULL;
             self->is_connected = PR_FALSE;
         }        
-
+    
+void
+DESTROY(self)
+    Net::NSS::SSL self;
+    PREINIT:
+        SV * pin_arg;
+    CODE:
+        if (self->ssl_fd) {
+            pin_arg = (SV *) SSL_RevealPinArg(self->ssl_fd);
+            if (pin_arg != NULL) {
+                SvREFCNT_dec(pin_arg);
+            }
+        }
+        if (self->ssl_fd != NULL) {
+            PR_Close(self->ssl_fd);
+        }        
+        if (self->client_certificate_hook_arg) {
+            SvREFCNT_dec(self->client_certificate_hook_arg);
+        }
+        if (self->client_certificate_hook) {
+            SvREFCNT_dec(self->client_certificate_hook);
+        }
+        Safefree(self);
+        
 Crypt::NSS::Certificate
 peer_certificate(self)
     Net::NSS::SSL self;
@@ -676,10 +746,10 @@ verify_hostname(self, hostname)
     Crypt::NSS::Certificate self;
     const char * hostname;
     CODE:
-        RETVAL = true;
+        RETVAL = TRUE;
         if (CERT_VerifyCertName(self, hostname) != SECSuccess) {
             if (PR_GetError() == SSL_ERROR_BAD_CERT_DOMAIN) {
-                RETVAL = false;
+                RETVAL = FALSE;
             }
             else {
                 throw_exception_from_nspr_error("Failed to verify hostname");

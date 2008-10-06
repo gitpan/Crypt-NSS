@@ -26,7 +26,6 @@ $socket->import_into_ssl_layer();
 ok($socket->does_ssl);
 
 $socket->set_URL("127.0.0.1");
-$socket->set_client_certificate_hook("built-in", "127.0.0.1");
 $socket->set_pkcs11_pin_arg("crypt-nss");
 
 lives_ok {

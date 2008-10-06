@@ -1,5 +1,12 @@
 Revision history for Perl extension NSS.
 
+0.02  2008-10-06
+    - Added missing INSTALL file
+    - (set|get)_default_pkcs11_pin_arg in Crypt::NSS::PKCS11 has been replaced with a global
+      variable $Crypt::NSS::PKCS11::DefaultPinArg
+    - Wrote docs for Net::NSS::SSL/new
+    - Now really supports user defined client certificate hooks
+    
 0.01  2008-10-05
     - Initial non-development release
     - Updated docs

@@ -3,16 +3,7 @@ package Crypt::NSS::PKCS11;
 use strict;
 use warnings;
 
-{
-    my $default_pkcs11_pin_arg;
-    sub set_default_pkcs11_pin_arg {
-        $default_pkcs11_pin_arg = pop;
-    }
-    
-    sub get_default_pkcs11_pin_arg {
-        return $default_pkcs11_pin_arg;
-    }
-}
+our $DefaultPinArg;
 
 1;
 __END__
@@ -28,17 +19,21 @@ This module provides functions for obtaining certificates, keys, passwords etc.
 
 =head1 INTERFACE
 
+=head2 GLOBAL VARIABLES
+
+=over 4
+
+=item $DefaultPinArg
+
+The default PKCS#11 pin arg that can be set on C<Net::NSS::SSL> instances. This is useful when you want to 
+set a PKCS#11 pin arg on sockets where you can't control directly what's set to C<new>. This is mostly used when 
+you use NSS with LWP.
+
+=back
+
 =head2 CLASS METHODS
 
 =over
-
-=item set_default_pkcs11_pin_arg ( $arg : scalar ) 
-
-=item get_default_pkcs11_pin_arg ( ) : scalar
-
-Sets the default PKCS#11 pin arg that can be set on C<Net::NSS::SSL> instances. This is useful when you want to 
-set a PKCS#11 pin arg on sockets where you can't control directly what's set to C<new>. This is mostly used when 
-you use NSS with LWP.
 
 =item set_password_hook ( $hook : code | string )
 

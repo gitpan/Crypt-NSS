@@ -58,7 +58,7 @@ sub new {
     $sock->import_into_ssl_layer();
 
     if (!exists $args{PKCS11_PinArg}) {
-        $sock->set_pkcs11_pin_arg(Crypt::NSS::PKCS11->get_default_pkcs11_pin_arg());
+        $sock->set_pkcs11_pin_arg($Crypt::NSS::PKCS11::DefaultPinArg);
     }
     
     # Maybe connect
@@ -88,11 +88,6 @@ sub sockhost {
 sub sockport {
     my (undef, $port) = shift->_sockaddr;
     return $port;
-}
-
-sub DESTROY {
-    my $self = shift;
-    $self->close();
 }
 
 # Alias needed for LWP among other things

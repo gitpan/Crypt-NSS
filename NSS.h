@@ -11,6 +11,7 @@
 #include "cert.h"
 #include "pk11func.h"
 #include "certt.h"
+#include "keyhi.h"
 
 #define HAS_ARGUMENT(hv, key) hv_exists(hv, key, strlen(key))
 #define SET_SOCKET_OPTION(socket, option, report) if (PR_SetSocketOption(socket, &option) != SECSuccess) { \
@@ -36,6 +37,8 @@ struct NSS_SSL_Socket {
     SV * verify_certificate_hook;
     SV * bad_certificate_hook;
     SV * client_certificate_hook;
+    SV * client_certificate_hook_arg;
+    
     bool is_connected;
     bool does_ssl;
 };

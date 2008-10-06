@@ -27,7 +27,7 @@ sub start_ssl_server {
     $Tester->skip_all(q{Fork failed}) unless defined $Pid;
 
     if ($Pid) {
-        sleep 2;
+        sleep 1;
         return;
     }
 
@@ -45,8 +45,12 @@ sub start_ssl_server {
     # password
     push @args, "-w", (exists $args{password} ? $args{password} : "crypt-nss");
     
-    close(STDERR);
-    close(STDOUT);
+    # certs
+    push @args, "-R" if $args{request_cert};    
+    push @args, "-F" if $args{require_cert};
+    
+    close *STDERR;
+    close *STDOUT;
     exec($bin, @args);
 }
 
