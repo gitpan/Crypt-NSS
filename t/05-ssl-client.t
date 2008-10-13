@@ -6,7 +6,7 @@ use warnings;
 
 use Test::More tests => 13;
 use Test::Exception;
-use Test::Crypt::NSS::SSLsample;
+use Test::Crypt::NSS::SelfServ;
 
 use Crypt::NSS config_dir => "db", cipher_suite => "US";
 
@@ -47,9 +47,13 @@ lives_ok {
     }
 };
 
-like($reply, qr{<h2>This is your request:</h2><br>GET / HTTP/1.0});
+like($reply, qr{Server: Generic Web Server});
 
 is($socket->peerport(), 4433);
 is($socket->peerhost(), "127.0.0.1");
 
 $socket->close();
+
+
+stop_ssl_server();
+

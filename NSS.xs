@@ -61,20 +61,23 @@ bad_certificate_hook(void * arg, PRFileDesc * fd) {
 SECStatus
 client_certificate_hook(void * arg, PRFileDesc * fd, CERTDistNames * ca_names, CERTCertificate ** target_cert, SECKEYPrivateKey ** target_key) {
     dSP;
-    SV * self = (SV *) arg;
-    SV * rv;
+    Net__NSS__SSL socket = (Net__NSS__SSL) arg;
+    SV * rv, * self;
     IV tmp, rcount;
-    Net__NSS__SSL socket;
+    
     SECStatus status = SECSuccess;
-    
-    tmp = SvIV((SV *) SvRV(self));
-    socket = INT2PTR(Net__NSS__SSL, tmp);
-    
+        
     ENTER;
     SAVETMPS;
     PUSHMARK(SP);
+
+    /* Hack to prevent FREETMPS from closing socket */
+    socket->do_not_free = TRUE;
     
-    XPUSHs(sv_2mortal(newSVsv(self)));
+    self = sv_newmortal();
+	sv_setref_pv(self, "Net::NSS::SSL", (void *) socket);
+	
+    XPUSHs(self);
     XPUSHs(sv_2mortal(newSVsv(socket->client_certificate_hook_arg)));
 
     PUTBACK;
@@ -112,6 +115,9 @@ client_certificate_hook(void * arg, PRFileDesc * fd, CERTDistNames * ca_names, C
     PUTBACK;
     FREETMPS;
     LEAVE;
+
+    /* Hack to prevent FREETMPS from closing socket */
+    socket->do_not_free = FALSE;
         
     return status;
 }
@@ -340,9 +346,11 @@ set_client_certificate_hook(self, hook, data=NULL)
             SSL_GetClientAuthDataHook(self->ssl_fd, NSS_GetClientAuthData, NULL);
         }
         else if (SvTRUE(hook)) {
-            SSL_GetClientAuthDataHook(self->ssl_fd, client_certificate_hook, ST(0));
-            self->client_certificate_hook = SvREFCNT_inc(hook);        
-            self->client_certificate_hook_arg = SvREFCNT_inc(data);
+            SSL_GetClientAuthDataHook(self->ssl_fd, client_certificate_hook, self);
+            self->client_certificate_hook = SvREFCNT_inc(hook);    
+            if (data) {   
+                self->client_certificate_hook_arg = SvREFCNT_inc(data);
+            }
         }
         else {
             SSL_GetClientAuthDataHook(self->ssl_fd, NULL, NULL);
@@ -615,29 +623,42 @@ subject(self)
         RETVAL
     
 I32
-write(self, data)
+write(self, data, length = 0, offset = 0)
     Net::NSS::SSL self;
     SV * data;
+    I32 length;
+    I32 offset;
     PREINIT:
         char *buf;
         PRInt32 bytes_written = 0;
-        STRLEN len;
+        STRLEN blen;
     CODE:
-        buf = SvPVx(data, len);
-        if (len) {
-            bytes_written = PR_Write(self->ssl_fd, buf, len);
-            if (bytes_written < 0) {
-                throw_exception_from_nspr_error("Failed to write to socket");
+        buf = SvPVx(data, blen);
+        length = length > 0 ? length : blen;
+        if (offset < 0) {
+            if (-offset > blen) {
+                croak("Offset outside string");
             }
+        }
+        else if (offset >= blen && blen > 0) {
+            croak("Offset outside string");
+        }
+        if (length > blen - offset) {
+            length = blen - offset;
+        }
+        bytes_written = PR_Write(self->ssl_fd, buf + offset, length);
+        if (bytes_written < 0) {
+            throw_exception_from_nspr_error("Failed to write to socket");
         }
         RETVAL = bytes_written;
     OUTPUT:
         RETVAL
         
 I32
-read(self, buf, chunk_size = BUFFER_SIZE)
+read(self, buf, length = BUFFER_SIZE, offset = 0)
     Net::NSS::SSL self;
-    I32 chunk_size;
+    I32 length;
+    I32 offset;
     PREINIT:
         char *buf;
         PRInt32 bytes_read;
@@ -649,10 +670,21 @@ read(self, buf, chunk_size = BUFFER_SIZE)
             sv_setpv(buf_sv, "");
         }
         buf = SvPV_force(buf_sv, len);
-        buf = SvGROW(buf_sv, chunk_size + 1);
-        bytes_read = PR_Read(self->ssl_fd, buf, chunk_size);
+        if (offset < 0) {
+            if (-offset > len) {
+                croak("Offset outside string");
+            }
+            offset += len;
+        }
+        if (offset > len) {
+            Newz(1, buf, offset - len, char);
+            sv_catpvn(buf_sv, buf, offset - len);
+        }
+        buf = SvGROW(buf_sv, offset + length + 1);
+        bytes_read = PR_Read(self->ssl_fd, buf + offset, length);
         if (bytes_read > 0) {
-            SvCUR_set(buf_sv, bytes_read);
+            SvCUR_set(buf_sv, offset + bytes_read);
+            buf[offset + bytes_read] = '\0';
         }
         else if (bytes_read == 0) {
             sv_setsv(buf_sv, &PL_sv_undef);
@@ -680,6 +712,10 @@ DESTROY(self)
     PREINIT:
         SV * pin_arg;
     CODE:
+        /* Hack that prevents tmp stuff to close this */
+        if (self->do_not_free)
+            return;
+            
         if (self->ssl_fd) {
             pin_arg = (SV *) SSL_RevealPinArg(self->ssl_fd);
             if (pin_arg != NULL) {

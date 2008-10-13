@@ -39,6 +39,7 @@ struct NSS_SSL_Socket {
     SV * client_certificate_hook;
     SV * client_certificate_hook_arg;
     
+    bool do_not_free; /* ugly hack to prevent hooks from killing this */
     bool is_connected;
     bool does_ssl;
 };

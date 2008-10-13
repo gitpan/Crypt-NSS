@@ -5,7 +5,7 @@ use strict;
 use warnings;
 
 use Test::More tests => 5;
-use Test::Crypt::NSS::SSLsample;
+use Test::Crypt::NSS::SelfServ;
 
 use Crypt::NSS config_dir => "db", cipher_suite => "US";
 
@@ -21,7 +21,7 @@ $socket->set_client_certificate_hook(sub {
     my ($self, $nickname) = @_;
     my ($cert, $key);
 
-    is ($self, $socket, "Passed socket is correct");
+    is ($$self, $$socket, "Passed socket is correct");
     is ($nickname, "127.0.0.1", "Got expected nickname");
     
     $cert = Crypt::NSS::PKCS11->find_cert_by_nickname($nickname, $self->get_pkcs11_pin_arg);
@@ -38,6 +38,9 @@ $socket->write("GET / HTTP/1.0\n\n\n\n");
 
 my $buffer;
 my $reply = "";
-while ($socket->read($buffer) > 0) { $reply .= $buffer }
+while ($socket->read($buffer) > 0) { $reply .= $buffer; }
 ok($reply, "Got data so auth worked");
 $socket->close();
+
+stop_ssl_server();
+

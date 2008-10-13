@@ -6,6 +6,8 @@ use warnings;
 use Carp qw(croak);
 use Socket;
 
+use Crypt::NSS::Constants qw(:ssl);
+
 use Net::NSS::SSL::LWPCompat;
 
 my %socket_type = ( 
@@ -13,6 +15,9 @@ my %socket_type = (
 	udp  => SOCK_DGRAM,
 	icmp => SOCK_RAW,
 );
+
+our $DefaultClientCertHook;
+our $DefaultClientCertHookArg;
 
 sub new {
     my $pkg = shift;
@@ -57,10 +62,39 @@ sub new {
     # Upgrade to SSL socket
     $sock->import_into_ssl_layer();
 
-    if (!exists $args{PKCS11_PinArg}) {
+    if (!exists $args{SSL_PKCS11_PinArg}) {
         $sock->set_pkcs11_pin_arg($Crypt::NSS::PKCS11::DefaultPinArg);
     }
     
+    # Client certificates, only for client sockets
+    if ($args{PeerHost} && $args{PeerPort}) {
+        my @client_cert_arg = exists $args{SSL_ClientCertHookArg} ? $args{SSL_ClientCertHookArg} : 
+                              defined $DefaultClientCertHookArg ? $DefaultClientCertHookArg :
+                              ();
+                              
+        if (!exists $args{SSL_ClientCertHook}) {
+            if ($DefaultClientCertHook) {
+                $sock->set_client_certificate_hook($DefaultClientCertHook, @client_cert_arg);
+            }
+        }
+        else {
+            $sock->set_client_certificate_hook($args{SSL_ClientCertHook}, @client_cert_arg);
+        }
+    }
+
+    # SSL Options
+    my @options;
+    push @options, map { [$_ => SSL_OPTION_ENABLED] } @{$args{SSL_EnableOptions}} if ref $args{SSL_EnableOptions} eq "ARRAY";
+    push @options, map { [$_ => SSL_OPTION_DISABLED] } @{$args{SSL_DisableOptions}} if ref $args{SSL_DisableOptions} eq "ARRAY";
+    for my $opt (@options) {
+        my ($opt_name, $on) = @$opt;
+        eval {
+            $opt_name = Crypt::NSS::Constants->$opt_name();
+        };
+        croak "Unkown option '$opt_name'" if $@;
+        $sock->set_option($opt_name, $on);
+    }
+
     # Maybe connect
     if ($args{PeerHost} && $args{PeerPort} && !(exists $args{Connect} && !$args{Connect})) {
         $sock->set_URL($args{PeerHost});
@@ -130,6 +164,60 @@ connecting or listening.
 
 Creates a new socket, sets it up correctly, imports it into NSS SSL layer and optionally if it's a 
 client-side socket connect to the remote host.
+
+=over 4
+
+=item PeerAddr : string
+
+The peer to connect to in form of C<<host>>, C<<host>:<port>> or C<<host>:<service>> where host is either an IP number or a hostname, port 
+a integer in the range 1-65535. If a service is specified such as C<http> or C<ftp>, its port number is looked up using C<getservbyname> with 
+the proto C<tcp>.
+
+=item PeerPort : string | integer
+
+The numerical port or a service name to connect to. If I<PeerAddr> is specified it may take precedence over this. 
+
+=item PeerHost : string
+
+The host to connect to as either an IP number or a hostname. If I<PeerAddr> is specified is may take precedence over this.
+
+=item Connect : boolean
+
+If true then create the socket, import it into SSL, set the specfied options but don't connect. Defaults to false if omitted.
+
+=item KeepAlive : boolean
+
+Periodically test whether connection is still alive. Default to false if omitted.
+
+=item Blocking : boolean
+
+Blocking or non-blocking I/O. Default to 1 if omitted or what the class method C<blocking> returns if such exists.
+
+=item SSL_PKCS11_PinArg : scalar
+
+Sets the PKCS11 pin arg that is sent along to various funcions for the socket. 
+
+See also: L<Net::NSS::SSL/set_pkcs11_pin_arg>
+
+=item SSL_ClientCertHook : coderef | string
+
+Sets the client certificte hook for the socket. If ommited defaults I<$DefaultClientCertHook> if one is defined.
+
+See also: L<Net::NSS::SSL/set_client_certificate_hook>. 
+
+=item SSL_ClientCertHookArg : scalar
+
+Sets the client certificate hook argument for the socket. If ommited defaults to I<$DefaultClientCertHookArg> if defined.
+
+=item SSL_EnableOptions : arrayref
+
+A list of options to enable where the items are either numeric or a constant name from C<Crypt::NSS::SSL::Constants>.
+
+=item SSL_DisableOptions : arrayref
+
+A list of options to enable where the items are either numeric or a constant name from C<Crypt::NSS::SSL::Constants>.
+
+=back
 
 =item create_socket ( $type : string ) : Net::NSS::SSL
 

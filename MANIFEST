@@ -28,7 +28,8 @@ t/04-ssl-server.t
 t/05-ssl-client.t
 t/06-certificates.t
 t/07-ssl-client-auth.t
-t/lib/Test/Crypt/NSS/SSLsample.pm
+t/08-lwpcompat.t
+t/lib/Test/Crypt/NSS/SelfServ.pm
 t/lib/Test/Crypt/NSS/TestServer.pm
 t/pod-coverage.t
 t/pod.t

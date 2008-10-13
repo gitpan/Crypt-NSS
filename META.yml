@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:               Crypt-NSS
-version:            0.02
+version:            0.03
 abstract:           Perl bindings to NSS (Netscape Security Services)
 author:
     - Claes Jakobsson <claesjac@cpan.org>

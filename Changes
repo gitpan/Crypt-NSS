@@ -1,5 +1,12 @@
 Revision history for Perl extension NSS.
 
+0.03  2008-10-13
+    - read() and write() in Net::NSS::SSL now actually suppots length and offsets as documented.
+    - Use "selfserv" instead of SSLsample "server" as it's getting removed in NSS 3.12 + 1 release.
+    - Default to use US export suite instead of International.
+    - More options to Net::NSS::SSL/new and docs for it
+    - Fixes to LWPCompat and client certs
+    
 0.02  2008-10-06
     - Added missing INSTALL file
     - (set|get)_default_pkcs11_pin_arg in Crypt::NSS::PKCS11 has been replaced with a global
