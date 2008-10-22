@@ -1,5 +1,13 @@
 Revision history for Perl extension NSS.
 
+0.04  2008-10-22
+    - LWPCompat now overrides configure so http_configure in Net::HTTP::Methods gets called correctly.
+    - LWPCompat now also sets $Net::HTTPS::SSL_SOCKET_CLASS for you on import.
+    - Net::NSS::SSL now has a $DefaultURL global that can be set to override default behavior of setting
+      verification URL to what PeerHost says.
+    - Now really supports verification hooks. Also a "built-in-ignore" hook exists to skip verification.
+    - Read now sets passed buffer to an empty string if 0 bytes was read instead of to undefined.
+      
 0.03  2008-10-13
     - read() and write() in Net::NSS::SSL now actually suppots length and offsets as documented.
     - Use "selfserv" instead of SSLsample "server" as it's getting removed in NSS 3.12 + 1 release.

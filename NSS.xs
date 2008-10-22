@@ -47,10 +47,42 @@ pkcs11_password_hook(PK11SlotInfo *info, PRBool retry, void *arg) {
     return password;
 }
 
+/* This is out ignore verification hook */
+SECStatus
+verify_certificate_ignore_hook(void * arg, PRFileDesc * fd, PRBool check_sig, PRBool is_server) {
+    return SECSuccess;
+}
+
 /* This is called when we need to verify an incoming certificate */
 SECStatus
 verify_certificate_hook(void * arg, PRFileDesc * fd, PRBool check_sig, PRBool is_server) {    
-    return SECSuccess;
+    dSP;
+    Net__NSS__SSL socket = (Net__NSS__SSL) arg;
+    SV * rv, * self;
+    IV tmp, rcount;
+    
+    SECStatus status = SECSuccess;
+    
+    ENTER;
+    SAVETMPS;
+    PUSHMARK(SP);
+    
+    /* Hack to prevent FREETMPS from closing socket */
+    socket->do_not_free = TRUE;
+    
+    self = sv_newmortal();
+	sv_setref_pv(self, "Net::NSS::SSL", (void *) socket);
+	
+    XPUSHs(self);
+    XPUSHs(sv_2mortal(newSVsv(socket->client_certificate_hook_arg)));
+    
+    PUTBACK;
+
+    rcount = call_sv(socket->client_certificate_hook, G_SCALAR);
+
+    SPAGAIN;
+        
+    return status;
 }
 
 SECStatus
@@ -284,16 +316,14 @@ set_verify_certificate_hook(self, hook)
         if (self->verify_certificate_hook != NULL) {
             SvREFCNT_dec(self->verify_certificate_hook);
         }
-        if (SvTRUE(hook)) {
+        if (SvPOK(hook) && strEQ(SvPV_nolen(hook), "built-in-ignore")) {
+            EVALUATE_SEC_CALL(SSL_AuthCertificateHook(self->ssl_fd, verify_certificate_ignore_hook, NULL), "Failed to set auth certificate hook to ignore");
+        }
+        else if (SvTRUE(hook)) {
             if (self->verify_certificate_hook != NULL) {
                 EVALUATE_SEC_CALL(SSL_AuthCertificateHook(self->ssl_fd, verify_certificate_hook, self), "Failed to set auth certificate hook");
             }
-            if (self->verify_certificate_hook == NULL) {
-                self->verify_certificate_hook = newSVsv(hook);
-            }
-            else {
-                sv_setsv(self->verify_certificate_hook, hook);
-            }
+            self->verify_certificate_hook = SvREFCNT_inc(hook);
         }
         else {
             EVALUATE_SEC_CALL(SSL_AuthCertificateHook(self->ssl_fd, SSL_AuthCertificate, NULL), "Failed to set default auth certificate hook");
@@ -682,12 +712,9 @@ read(self, buf, length = BUFFER_SIZE, offset = 0)
         }
         buf = SvGROW(buf_sv, offset + length + 1);
         bytes_read = PR_Read(self->ssl_fd, buf + offset, length);
-        if (bytes_read > 0) {
+        if (bytes_read >= 0) {
             SvCUR_set(buf_sv, offset + bytes_read);
             buf[offset + bytes_read] = '\0';
-        }
-        else if (bytes_read == 0) {
-            sv_setsv(buf_sv, &PL_sv_undef);
         }
         else {
             throw_exception_from_nspr_error("Failed to read from socket");

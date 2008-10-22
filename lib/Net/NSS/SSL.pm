@@ -16,8 +16,17 @@ my %socket_type = (
 	icmp => SOCK_RAW,
 );
 
+# What client cert hook to use if not specified
 our $DefaultClientCertHook;
+
+# What argument to send to the client cert hook if not specified
 our $DefaultClientCertHookArg;
+
+# What URL to set on the socket that the verification should be against if not specified.
+our $DefaultURL;
+
+# The callback to use for verifing certs
+our $DefaultVerifyCertHook;
 
 sub new {
     my $pkg = shift;
@@ -82,6 +91,14 @@ sub new {
         }
     }
 
+    # Verification callback
+    if ($args{SSL_VerifyCertHook}) {
+        $sock->set_verify_certificate_hook($args{SSL_VerifyCertHook});
+    }
+    elsif ($DefaultVerifyCertHook) {
+        $sock->set_verify_certificate_hook($DefaultVerifyCertHook);
+    }
+    
     # SSL Options
     my @options;
     push @options, map { [$_ => SSL_OPTION_ENABLED] } @{$args{SSL_EnableOptions}} if ref $args{SSL_EnableOptions} eq "ARRAY";
@@ -97,7 +114,16 @@ sub new {
 
     # Maybe connect
     if ($args{PeerHost} && $args{PeerPort} && !(exists $args{Connect} && !$args{Connect})) {
-        $sock->set_URL($args{PeerHost});
+        if ($args{SSL_URL}) {
+            $sock->set_URL($args{SSL_URL});
+        }
+        elsif ($DefaultURL) {
+            $sock->set_URL($DefaultURL);
+        }
+        else {            
+            $sock->set_URL($args{PeerHost});
+        }
+        
         $sock->connect($args{PeerHost}, $args{PeerPort}, ($args{Timeout} ? $args{Timeout} : ()));
     }
 
@@ -209,6 +235,12 @@ See also: L<Net::NSS::SSL/set_client_certificate_hook>.
 
 Sets the client certificate hook argument for the socket. If ommited defaults to I<$DefaultClientCertHookArg> if defined.
 
+=item SSL_CertVerifyHook : coderef | string
+
+Sets the hook that is called to verify the certificate. If ommited defaults to I<$DefaultVerifyCertHook> if one is defined.
+
+See also: L<Net::NSS::SSL/set_verify_certificate_hook>.
+
 =item SSL_EnableOptions : arrayref
 
 A list of options to enable where the items are either numeric or a constant name from C<Crypt::NSS::SSL::Constants>.
@@ -216,6 +248,11 @@ A list of options to enable where the items are either numeric or a constant nam
 =item SSL_DisableOptions : arrayref
 
 A list of options to enable where the items are either numeric or a constant name from C<Crypt::NSS::SSL::Constants>.
+
+=item SSL_URL : string
+
+Sets the host/URL that the server certificate will be verified against. If ommited defaults to I<$DefaultURL> if defined, 
+otherwise uses I<PeerHost>.
 
 =back
 
@@ -356,7 +393,9 @@ Example:
       
       return SEC_SUCCESS;
   }
-  
+
+If you pass C<built-in-ignore> as the name we use a hook that never verifies the cert.
+
 =item set_bad_certificate_hook ( $hook : coderef | string )
 
 Sets a custom hook that is called when certficate authentication (the callback specified above) fails. 

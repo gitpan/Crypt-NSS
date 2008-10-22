@@ -4,7 +4,7 @@ use 5.006002;
 use strict;
 use warnings;
 
-our $VERSION = '0.03';
+our $VERSION = '0.04';
 
 require XSLoader;
 XSLoader::load('Crypt::NSS', $VERSION);
@@ -111,6 +111,23 @@ the default config directory (C<.>).
 =item shutdown ( )
 
 Closes the certificate and key databases.
+
+=back
+
+=head1 ISSUES THAT ARE NOT BUGS
+
+=over 4
+
+=item Forking and outgoing sockets
+
+If your script forks after it has done initialization and you try to open a outgoing socket, ie. 
+one that connects to a remote host, you'll get failures like "-12215 MD5 digest function failed".
+
+This is not a bug in this module and is a recent fix in the underlying NSS library. The PKCS#11 standard 
+says that after a fork all PKCS#11 modules must be reinitialized again. So if you want to fork, make sure 
+you don't initialize NSS in the parent process.
+
+L<https://bugzilla.mozilla.org/show_bug.cgi?id=331096>
 
 =back
 

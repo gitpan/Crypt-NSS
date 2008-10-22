@@ -9,6 +9,8 @@ README
 db/cert8.db
 db/key3.db
 db/secmod.db
+db/server-invalid.crt
+db/server-invalid.req
 db/server.crt
 db/server.req
 examples/lwp-https.pl
@@ -29,6 +31,8 @@ t/05-ssl-client.t
 t/06-certificates.t
 t/07-ssl-client-auth.t
 t/08-lwpcompat.t
+t/09-lwpcompat-expired.t
+t/10-lwpcompat-setisa.t
 t/lib/Test/Crypt/NSS/SelfServ.pm
 t/lib/Test/Crypt/NSS/TestServer.pm
 t/pod-coverage.t
